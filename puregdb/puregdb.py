@@ -292,7 +292,7 @@ class PureGDB(gdb.Command):
         def print_results(entries):
             if len(entries) == 0:
                 return False
-            print("\n".join([str(e) for e in entries]))
+            print("\n".join(["\t" + str(e) for e in entries]))
             return True
 
         # no arguments, display memory map
@@ -323,7 +323,7 @@ class PureGDB(gdb.Command):
 
         for field, desc in heap_stats_entries.iteritems():
             indent = (maxlen - len(desc)) * ' '
-            print desc + indent, ":", getattr(stats, field)
+            print "\t" + desc + indent, ":", getattr(stats, field)
 
     def cmd_stackcheck(self, args=None):
         blocksize = STACKHEALTH_DEFAULT_BLOCK_SIZE
@@ -393,13 +393,14 @@ class PureGDB(gdb.Command):
 
     def cmd_tasks(self, args=None):
         tasks = [(int(t.v['uxTCBNumber']), t) for t in self._get_threads()]
-        print "#\tPrio\tStack start\tStack end\tTask"
+        print "\t#\tHandle\t\tPrio\tStack start\tStack end\tTask"
         for num, t in sorted(tasks, key=lambda p: p[0]):
+            address = t.get_address()
             prio = int(t.v['uxPriority'])
             stack_start = int(t.v['pxStack'])
             stack_end = int(t.v['pxEndOfStack'])
             name = t.get_name()
-            print num, "\t", prio, "\t", hex(stack_start), "\t", hex(stack_end), "\t", name
+            print "\t", num, "\t", hex(address), "\t", prio, "\t", hex(stack_start), "\t", hex(stack_end), "\t", name
 
     def invoke(self, arg, from_tty):
         if arg == "":
