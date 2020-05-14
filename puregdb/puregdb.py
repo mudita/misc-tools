@@ -326,19 +326,19 @@ class PureGDB(gdb.Command):
             print desc + indent, ":", getattr(stats, field)
 
     def cmd_stackcheck(self, args=None):
-        valid = True
-
-        if len(args) > 1:
-            print "Usage: pure stackcheck [BLOCKSIZE]"
-            return
-
         blocksize = STACKHEALTH_DEFAULT_BLOCK_SIZE
-        if len(args) == 1:
-            try:
-                blocksize = int(args[0])
-            except:
-                print "Invalid block size, defaulting to", blocksize
+        if args is not None:
+            if len(args) > 1:
+                print "Usage: pure stackcheck [BLOCKSIZE]"
+                return
 
+            if len(args) == 1:
+                try:
+                    blocksize = int(args[0])
+                except:
+                    print "Invalid block size, defaulting to", blocksize
+
+        valid = True
         for t in self._get_threads():
             try:
                 if not t.check_stack(blocksize):
