@@ -142,10 +142,12 @@ HeapStats = collections.namedtuple(
 
 
 class HeapError(Exception):
-    def __init__(self, entry, reason=""):
+    def __init__(self, entry, reason="", prev=None):
         self.entry = entry
+        self.prev = prev
         self.reason = reason
         self.address = int(entry.address)
+        self.prev_address = int(prev.address)
 
     def __str__(self):
         return self.reason
@@ -221,17 +223,19 @@ class Heap(AddressRegistree):
             raise HeapError(self.start, "Error in start block")
 
         entry = self.start['pxNextTakenBlock']
+        prev = entry
         count = 0
 
         while entry.address != self.taken_end.address:
-            if self._check_ptr_invalid(entry['pxNextTakenBlock']) and entry['pxNextTakenBlock'] != self.taken_end.address:
-                raise HeapError(entry, "Invalid next taken block")
-
             if int(entry['ulMarker']) != Heap.MARKER_ALLOCATED:
-                raise HeapError(entry, "Invalid marker")
+                raise HeapError(entry, "Invalid marker", prev)
+
+            if self._check_ptr_invalid(entry['pxNextTakenBlock']) and entry['pxNextTakenBlock'] != self.taken_end.address:
+                raise HeapError(entry, "Invalid next taken block", prev)
 
             yield Heap._make_pod_entry(entry)
 
+            prev = entry
             entry = entry['pxNextTakenBlock'].dereference()
 
     def validate(self):
@@ -254,6 +258,8 @@ class Heap(AddressRegistree):
         except HeapError as he:
             print "Reason:", he
             print "Problematic entry at: ", hex(he.address)
+            if he.prev is not None:
+                print "Previous entry at: ", hex(he.prev_address)
             return False
 
         return True
