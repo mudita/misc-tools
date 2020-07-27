@@ -2,6 +2,7 @@
 
 from binascii import unhexlify as uhx
 import cxxfilt
+import re
 from os.path import abspath
 from os import getcwd
 import sys
@@ -28,6 +29,24 @@ def usage(appname):
 def map_add_unique_by_name(dir, value):
     if value.name not in dir.keys():
         dir[value.name] = value
+
+
+def fn2nodelist(filename):
+    parts = filename.strip().split("/")
+    if parts[0] == "":
+        if len(parts) == 1:
+            return []
+        else:
+            parts = parts[1:]
+
+    ofn = parts[-1]
+    match = re.match(r"(.*)\((.*)\)", ofn)
+    if match is not None:
+        libname = match[1]
+        objname = match[2]
+        parts = parts[:-1] + [libname, objname]
+
+    return parts
 
 
 class MapEntity(object):
@@ -76,6 +95,86 @@ class Section(MapEntity):
 class ObjectFile(SymbolSet):
     def __init__(self, filename):
         SymbolSet.__init__(self, filename)
+
+
+class ObjectTreeNode(object):
+    def __init__(self, parent, name, size=0):
+        self.parent = parent
+        self.name = name
+        self.size = size
+        self.total_size = self.size
+        self.cached_size = 0
+        self.children = []
+
+    def add_node(self, node):
+        if node in self.children:
+            return
+        self.increase_total_size(node.total_size)
+        self.children.append(node)
+        node.parent = self
+
+    def increase_total_size(self, size):
+        self.total_size += size
+        if self.parent is not None:
+            self.parent.increase_total_size(size)
+
+    def __str__(self):
+        return self.name + ": " + str(self.size)
+
+
+class ObjectTree(object):
+    def __init__(self, objectlist):
+        self.objects = objectlist
+        self.nodelist = {}
+        self.root = ObjectTreeNode(None, "root", 0)
+        self.index(self.objects)
+
+    def index(self, objectlist):
+        for o in objectlist:
+            self.index_file(o)
+
+    def index_file(self, objectfile):
+        nodenames = fn2nodelist(objectfile.name)
+        lastnode = ObjectTreeNode(None, nodenames[-1], objectfile.size)
+        self.nodelist["/".join(nodenames)] = lastnode
+
+        nodes = [self.root]
+        key = ""
+        for nn in nodenames[:-1]:
+            key += "/" + nn
+            if key not in self.nodelist.keys():
+                node = ObjectTreeNode(None, nn)
+                self.nodelist[key] = node
+            else:
+                node = self.nodelist[key]
+            nodes.append(node)
+        nodes.append(lastnode)
+
+        for i in range(len(nodes) - 1, 0, -1):
+            nodes[i - 1].add_node(nodes[i])
+
+
+def output_tree_node(node, recursive=True, indentSize=0, parent_percentage=100.0):
+    indent = " " * indentSize
+    if node.parent is None:
+        percentage = 100.00
+    else:
+        percentage = node.total_size / node.parent.total_size * parent_percentage
+
+    print(
+        indent
+        + node.name
+        + " "
+        + str(node.total_size)
+        + "\t("
+        + format(percentage, ".2f")
+        + "%)"
+    )
+    if recursive:
+        for child in sorted(node.children, key=lambda ch: ch.total_size, reverse=True):
+            output_tree_node(
+                child, recursive, indentSize + 1, parent_percentage=percentage
+            )
 
 
 class MapFile(object):
@@ -248,7 +347,7 @@ class Parser(object):
 
                 lastsymbol = None
                 symbols = []
-                if not filepath.startswith('/'):
+                if not filepath.startswith("/"):
                     filepath = self.source_path + "/" + filepath
 
                 filepath = abspath(filepath)
@@ -352,14 +451,5 @@ if __name__ == "__main__":
         print("Can't read file:", filename)
         sys.exit(2)
 
-    # print("Found", len(mapfile.get_sections()), "sections")
-    # for s in sorted(mapfile.get_sections(), key=lambda s: s.name):
-    #    print(s.name)
-
-    print("Found", len(mapfile.get_files()), "files")
-
-    for file in mapfile.get_files_sorted():
-        file.recalculate_size()
-        print(file.size, file.name)
-        for symbol in file.get_symbols_sorted():
-            print("  ", symbol.size, symbol.name)
+    tree = ObjectTree(mapfile.get_files())
+    output_tree_node(tree.root)
