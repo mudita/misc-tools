@@ -136,7 +136,9 @@ class ObjectTree(object):
     def index_file(self, objectfile):
         nodenames = fn2nodelist(objectfile.name)
         lastnode = ObjectTreeNode(None, nodenames[-1], objectfile.size)
-        self.nodelist["/".join(nodenames)] = lastnode
+
+        for symbol in objectfile.get_symbols():
+            lastnode.add_node(ObjectTreeNode(None, symbol.name, symbol.size))
 
         nodes = [self.root]
         key = ""
@@ -154,26 +156,40 @@ class ObjectTree(object):
             nodes[i - 1].add_node(nodes[i])
 
 
-def output_tree_node(node, recursive=True, indentSize=0, parent_percentage=100.0):
+def output_tree_node(
+    node, recursive=True, indentSize=0, name_indent=None, parent_percentage=100.0
+):
     indent = " " * indentSize
     if node.parent is None:
-        percentage = 100.00
+        percentage = parent_percentage
+        local_percentage = 100.0
     else:
         percentage = node.total_size / node.parent.total_size * parent_percentage
+        local_percentage = node.total_size / node.parent.total_size * 100.0
+
+    if name_indent is None:
+        name_indent = len(node.name)
 
     print(
         indent
         + node.name
-        + " "
+        + " " * (name_indent - len(node.name) + 1)
         + str(node.total_size)
-        + "\t("
+        + "\t"
         + format(percentage, ".2f")
-        + "%)"
+        + "%\t"
+        + format(local_percentage, ".2f")
+        + "%"
     )
-    if recursive:
+    if recursive and len(node.children) > 0:
+        max_child_name = max([len(ch.name) for ch in node.children])
         for child in sorted(node.children, key=lambda ch: ch.total_size, reverse=True):
             output_tree_node(
-                child, recursive, indentSize + 1, parent_percentage=percentage
+                child,
+                recursive,
+                indentSize + 1,
+                parent_percentage=percentage,
+                name_indent=max_child_name,
             )
 
 
