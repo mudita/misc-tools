@@ -18,7 +18,8 @@ DEFAULT_FILE_NAME = "linker.map"
 DEFAULT_SOURCE_PATH = getcwd()
 DEFAULT_SYMBOLS_COUNT = 10
 
-SECTION_NAME_WHITELIST = [".text", ".bss", ".data", ".rodata", ".exidx"]
+SECTION_NAME_WHITELIST = [".text", ".bss",
+                          ".data", ".rodata", ".exidx", ".extab"]
 
 
 def usage(appname):
@@ -299,11 +300,11 @@ class Parser(object):
         i = COL_SIZE_NAME
 
         # read address
-        address = tryhex(line[i : i + COL_SIZE_ADDR].strip())
+        address = tryhex(line[i: i + COL_SIZE_ADDR].strip())
         i += COL_SIZE_ADDR
 
         # read symbol size
-        ssize = tryhex(line[i : i + COL_SIZE_SIZE].strip())
+        ssize = tryhex(line[i: i + COL_SIZE_SIZE].strip())
         i += COL_SIZE_SIZE
 
         # read description
