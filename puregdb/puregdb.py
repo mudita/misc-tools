@@ -36,7 +36,7 @@ class AddressRegistree(object):
     def __init__(self):
         pass
 
-    def get_range():
+    def get_range(self):
         return AddressRegistry(
             low=self.get_low_address(),
             high=self.get_high_address(),
@@ -121,7 +121,7 @@ class PureTask(AddressRegistree):
         tsktype = gdb.lookup_type('struct tskTaskControlBlock')
         val = gdb.Value(handle)
         val = val.cast(tsktype.pointer())
-        return PureTask(inf, val)
+        return PureTask(inf, val) if val else None
 
 
 HeapEntry = collections.namedtuple('HeapEntry', [
@@ -177,12 +177,19 @@ class Heap(AddressRegistree):
         return int(self.address + self.total_size)
 
     @staticmethod
+    def _get_allocating_task(entry):
+        inferiors = gdb.inferiors()
+        if len(inferiors) != 1:
+            return None
+        return PureTask.from_handle(entry['xAllocatingTask'], inferiors[0])
+
+    @staticmethod
     def _make_pod_entry(entry):
         entrySize = int(entry['xBlockSize']) & 0x7fffffff
         return HeapEntry(
             size=entrySize,
             address=int(entry.address),
-            task=int(entry['xAllocatingTask'].address),
+            task=Heap._get_allocating_task(entry),
             time=int(entry['xTimeAllocated'])
         )
 
@@ -224,7 +231,6 @@ class Heap(AddressRegistree):
 
         entry = self.start['pxNextTakenBlock']
         prev = entry
-        count = 0
 
         while entry.address != self.taken_end.address:
             if int(entry['ulMarker']) != Heap.MARKER_ALLOCATED:
@@ -237,6 +243,15 @@ class Heap(AddressRegistree):
 
             prev = entry
             entry = entry['pxNextTakenBlock'].dereference()
+
+    def taken_per_task(self):
+        taken_blocks = self.taken()
+        histogram = {}
+        for block in taken_blocks:
+            if block.task:
+                task_name = block.task.get_name()
+                histogram[task_name] = histogram.get(task_name, 0) + block.size
+        return histogram
 
     def validate(self):
         try:
@@ -330,6 +345,11 @@ class PureGDB(gdb.Command):
         for field, desc in heap_stats_entries.iteritems():
             indent = (maxlen - len(desc)) * ' '
             print "\t" + desc + indent, ":", getattr(stats, field)
+
+        histogram = self.heap.taken_per_task()
+        for task_name, memory_size in histogram.items():
+            indent = (maxlen - len(task_name)) * ' '
+            print '\t' + task_name + indent, ':', str(memory_size)
 
     def cmd_stackcheck(self, args=None):
         blocksize = STACKHEALTH_DEFAULT_BLOCK_SIZE

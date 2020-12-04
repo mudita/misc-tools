@@ -152,7 +152,7 @@ will check every 4 bytes.
 
 ### Displaying system heap stats (`pure heapstats`)
 
-Display heap statistics with `pure heaptstats`:
+Display overall and tasks' heap statistics with `pure heaptstats`:
 ```
 (gdb) pure heapstats
 Free blocks count                     : 1
@@ -162,7 +162,17 @@ Free size                             : 171496
 Taken blocks count                    : 133
 Overall size of blocks (w/o metadata) : 160240
 Overall heap size                     : 331776
-
+ServiceBluetooth                      : 1072
+ServiceCellular                       : 480
+SysMgrService                         : 133760
+mtp task                              : 33088
+ApplicationManager                    : 34200
+EventManager                          : 12176
+ServiceDesktop                        : 33088
+ServiceGUI                            : 10344
+ServiceEink                           : 240
+ServiceDB                             : 7920
+ServiceTime                           : 80
 ```
 
 ### Displaying list of tasks (`pure tasks`)
