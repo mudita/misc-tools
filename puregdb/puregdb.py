@@ -310,6 +310,10 @@ class PureGDB(gdb.Command):
         return [PureTask.from_handle(t.ptid[1], inf) for t in inf.threads()]
 
     def cmd_memory(self, args=None):
+        '''
+        Shows memory used for each thread
+        see `pure tasks` to show full thread information by thread basic
+        '''
         self._refresh_memory_map()
 
         def print_results(entries):
@@ -336,6 +340,10 @@ class PureGDB(gdb.Command):
             print("Can't match any of known memory regions to address", args[0])
 
     def cmd_heapcheck(self, args=None):
+        '''
+        Validates if heap used for stacks is not destroyed block by block
+        depends on configSYSTEM_HEAP_STATS define variable
+        '''
         if self.heap.validate():
             print("Heap check OK")
 
@@ -354,6 +362,10 @@ class PureGDB(gdb.Command):
             print('\t' + task_name + indent, ':', str(memory_size))
 
     def cmd_stackcheck(self, args=None):
+        '''
+        Verifies stacks for each thread with use of each TCB block
+        depends on: configSYSTEM_HEAP_INTEGRITY_CHECK define
+        '''
         blocksize = STACKHEALTH_DEFAULT_BLOCK_SIZE
         if args is not None:
             if len(args) > 1:
@@ -385,10 +397,18 @@ class PureGDB(gdb.Command):
             print("Stack check OK")
 
     def cmd_checkhealth(self, args=None):
+        '''
+        Verifies:
+            - stack for each thread with stackcheck
+            - heap on which stacks are allocated with heapcheck
+        '''
         self.cmd_stackcheck()
         self.cmd_heapcheck()
 
     def cmd_stackstats(self, args=None):
+        '''
+        Shows per task stack usage statistics
+        '''
         if args is None or len(args) == 0:
             stackdepth = STACKHEALTH_DEFAULT_BLOCK_SIZE
         elif len(args) == 1:
@@ -413,22 +433,41 @@ class PureGDB(gdb.Command):
             print("\t", format(d[3], "3.2f"), "\t", d[2], "\t", d[1], "\t", d[0])
 
     def cmd_help(self, args=None):
+        '''
+        Shows name for each function available as command and it's docstring
+        '''
         print("Valid commands:")
         for cmd in dir(PureGDB):
             if cmd.startswith("cmd_"):
+                docstring = eval("self.{}.__doc__".format(cmd))
+                if docstring is None:
+                    docstring = "Not documented"
                 cmd = cmd.replace("cmd_", "")
-                print("\t" + cmd)
+                print("\t{}".format(cmd))
+                for l in docstring.splitlines():
+                    print("\t\t{}".format(l))
 
     def cmd_tasks(self, args=None):
+        '''
+        Shows FreeRTOS tasks data in format:
+        |  no |     Handle | Priority | Stack start |  Stack end | Stack size |       Task name      |
+        ______________________________________________________________________________________________
+        |   1 | 0x20001360 |        3 |  0x20000f40 | 0x20001338 |       1016 |      System_Watchdog |
+        |   2 | 0x200039d8 |        0 |  0x200019b8 | 0x200039b0 |       8184 |        SysMgrService |
+        '''
         tasks = [(int(t.v['uxTCBNumber']), t) for t in self._get_threads()]
-        print("\t#\tHandle\t\tPrio\tStack start\tStack end\tTask")
+        header = "|  no |     Handle | Priority | Stack start |  Stack end | Stack size |       Task name      |"
+        print(header)
+        print("{}".format("".join([ '_' for v in header])))
         for num, t in sorted(tasks, key=lambda p: p[0]):
             address = t.get_address()
-            prio = int(t.v['uxPriority'])
+            priority = int(t.v['uxPriority'])
             stack_start = int(t.v['pxStack'])
             stack_end = int(t.v['pxEndOfStack'])
             name = t.get_name()
-            print("\t", num, "\t", hex(address), "\t", prio, "\t", hex(stack_start), "\t", hex(stack_end), "\t", name)
+            print("| {: >3} | 0x{:08x} | {: >8} |  0x{:08x} | 0x{:08x} | {: >10} | {: >20} |".format(
+                num, address, priority, stack_start, stack_end, stack_end - stack_start, name))
+        print("{}".format("".join([ '_' for v in header])))
 
     def invoke(self, arg, from_tty):
         if arg == "":
