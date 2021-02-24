@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import gdb
 
 import collections
@@ -260,21 +262,21 @@ class Heap(AddressRegistree):
                     pass
 
             except HeapError as he:
-                print "Error when iterating over heap's free entries"
+                print("Error when iterating over heap's free entries")
                 raise he
 
             try:
                 for _ in self.taken():
                     pass
             except HeapError as he:
-                print "Error when iterating over heap's taken entries"
+                print("Error when iterating over heap's taken entries")
                 raise he
 
         except HeapError as he:
-            print "Reason:", he
-            print "Problematic entry at: ", hex(he.address)
+            print("Reason:", he)
+            print("Problematic entry at: ", hex(he.address))
             if he.prev is not None:
-                print "Previous entry at: ", hex(he.prev_address)
+                print("Previous entry at: ", hex(he.prev_address))
             return False
 
         return True
@@ -289,7 +291,7 @@ class PureGDB(gdb.Command):
     def _get_inferior(self):
         infs = gdb.inferiors()
         if len(infs) != 1:
-            print "Warning: Multiple inferiors"
+            print("Warning: Multiple inferiors")
         return infs[0]
 
     def _refresh_memory_map(self):
@@ -322,20 +324,20 @@ class PureGDB(gdb.Command):
             return
 
         if len(args) > 1:
-            print "Usage: pure memory [address] "
+            print("Usage: pure memory [address] ")
 
         try:
             address = int(args[0], 16)
         except:
-            print "Invalid address: ", args[0]
+            print("Invalid address: ", args[0])
             return False
 
         if not print_results(self.address_registry.match(address)):
-            print "Can't match any of known memory regions to address", args[0]
+            print("Can't match any of known memory regions to address", args[0])
 
     def cmd_heapcheck(self, args=None):
         if self.heap.validate():
-            print "Heap check OK"
+            print("Heap check OK")
 
     def cmd_heapstats(self, args=None):
         stats = self.heap.get_stats()
@@ -344,43 +346,43 @@ class PureGDB(gdb.Command):
 
         for field, desc in heap_stats_entries.iteritems():
             indent = (maxlen - len(desc)) * ' '
-            print "\t" + desc + indent, ":", getattr(stats, field)
+            print("\t" + desc + indent, ":", getattr(stats, field))
 
         histogram = self.heap.taken_per_task()
         for task_name, memory_size in histogram.items():
             indent = (maxlen - len(task_name)) * ' '
-            print '\t' + task_name + indent, ':', str(memory_size)
+            print('\t' + task_name + indent, ':', str(memory_size))
 
     def cmd_stackcheck(self, args=None):
         blocksize = STACKHEALTH_DEFAULT_BLOCK_SIZE
         if args is not None:
             if len(args) > 1:
-                print "Usage: pure stackcheck [BLOCKSIZE]"
+                print("Usage: pure stackcheck [BLOCKSIZE]")
                 return
 
             if len(args) == 1:
                 try:
                     blocksize = int(args[0])
                 except:
-                    print "Invalid block size, defaulting to", blocksize
+                    print("Invalid block size, defaulting to", blocksize)
 
         valid = True
         for t in self._get_threads():
             try:
                 if not t.check_stack(blocksize):
-                    print "Stack check failed for:", t.get_name()
+                    print("Stack check failed for:", t.get_name())
                     valid = False
             except StackError as se:
-                print "Error when checking stack of a task at", hex(se.task.get_address())
-                print "Reason:", se
-                print "Check TCB blocks!"
+                print("Error when checking stack of a task at", hex(se.task.get_address()))
+                print("Reason:", se)
+                print("Check TCB blocks!")
                 valid = False
             except:
-                print "\nFatal error while checking stack!!!"
+                print("\nFatal error while checking stack!!!")
                 return
 
         if valid:
-            print "Stack check OK"
+            print("Stack check OK")
 
     def cmd_checkhealth(self, args=None):
         self.cmd_stackcheck()
@@ -392,8 +394,8 @@ class PureGDB(gdb.Command):
         elif len(args) == 1:
             stackdepth = int(args[0])
         else:
-            print "Invalid arguments"
-            print "Usage: pure stackcheck [stackdepth]"
+            print("Invalid arguments")
+            print("Usage: pure stackcheck [stackdepth]")
             return
 
         threads = self._get_threads()
@@ -406,27 +408,27 @@ class PureGDB(gdb.Command):
             pfree = float(free)/float(size)*100.0
             data.append((name, size, free, pfree))
 
-        print "\tFREE%\tFREE\tSIZE\tTASK"
+        print("\tFREE%\tFREE\tSIZE\tTASK")
         for d in sorted(data, key=lambda o: o[3]):
-            print "\t", format(d[3], "3.2f"), "\t", d[2], "\t", d[1], "\t", d[0]
+            print("\t", format(d[3], "3.2f"), "\t", d[2], "\t", d[1], "\t", d[0])
 
     def cmd_help(self, args=None):
-        print "Valid commands:"
+        print("Valid commands:")
         for cmd in dir(PureGDB):
             if cmd.startswith("cmd_"):
                 cmd = cmd.replace("cmd_", "")
-                print "\t" + cmd
+                print("\t" + cmd)
 
     def cmd_tasks(self, args=None):
         tasks = [(int(t.v['uxTCBNumber']), t) for t in self._get_threads()]
-        print "\t#\tHandle\t\tPrio\tStack start\tStack end\tTask"
+        print("\t#\tHandle\t\tPrio\tStack start\tStack end\tTask")
         for num, t in sorted(tasks, key=lambda p: p[0]):
             address = t.get_address()
             prio = int(t.v['uxPriority'])
             stack_start = int(t.v['pxStack'])
             stack_end = int(t.v['pxEndOfStack'])
             name = t.get_name()
-            print "\t", num, "\t", hex(address), "\t", prio, "\t", hex(stack_start), "\t", hex(stack_end), "\t", name
+            print("\t", num, "\t", hex(address), "\t", prio, "\t", hex(stack_start), "\t", hex(stack_end), "\t", name)
 
     def invoke(self, arg, from_tty):
         if arg == "":
@@ -438,14 +440,14 @@ class PureGDB(gdb.Command):
         try:
             handler = getattr(PureGDB, "cmd_" + cmd)
         except AttributeError:
-            print "Unregistered subcommand: " + cmd
+            print("Unregistered subcommand: " + cmd)
             self.cmd_help()
             return
 
         try:
             handler(self, args)
         except:
-            print traceback.format_exc()
+            print(traceback.format_exc())
 
 
 print("Registering 'pure' command")
