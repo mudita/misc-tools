@@ -6,6 +6,7 @@ import collections
 import traceback
 
 STACKHEALTH_DEFAULT_BLOCK_SIZE = 32
+HEAP_STRUCT_SIZE = 32
 
 
 def get_int_by_name(varname):
@@ -129,6 +130,9 @@ class PureTask(AddressRegistree):
 HeapEntry = collections.namedtuple('HeapEntry', [
     'address', 'size', 'task', 'time'
 ])
+UserHeapEntry = collections.namedtuple('UserHeapEntry', [
+    'address', 'size'
+])
 heap_stats_entries = {
     "minimum_free": "Lowest size of heap",
     "free": "Free size",
@@ -138,8 +142,18 @@ heap_stats_entries = {
     "free_block_count": "Free blocks count",
     "taken_block_count": "Taken blocks count"
 }
+user_heap_stats_entries = {
+    "minimum_free": "Lowest size of heap",
+    "free": "Free size",
+    "size": "Overall heap size",
+    "used": "Used size (block + metadata)",
+    "free_block_count": "Free blocks count"
+}
 HeapStats = collections.namedtuple(
     'HeapStats', heap_stats_entries.keys()
+)
+UserHeapStats = collections.namedtuple(
+    'UserHeapStats', user_heap_stats_entries.keys()
 )
 
 
@@ -153,6 +167,16 @@ class HeapError(Exception):
 
     def __str__(self):
         return self.reason
+        
+class UserHeapError(Exception):
+    def __init__(self, entry, reason="", prev=None):
+        self.entry = entry
+        self.prev = prev
+        self.reason = reason
+        self.useraddress = int(entry.address)
+
+    def __str__(self):
+        return self.reason        
 
 
 class Heap(AddressRegistree):
@@ -168,6 +192,11 @@ class Heap(AddressRegistree):
         self.total_size = ucHeap.dynamic_type.sizeof
         self.address = int(ucHeap.address)
         self.taken_end = gdb.lookup_symbol('xTakenEnd')[0].value()
+        self.userstart = gdb.lookup_symbol('userxStart')[0].value()
+        self.userfreeEnd = gdb.lookup_symbol('userpxEnd')[0].value()
+        userUcHeap = gdb.lookup_symbol('userUcHeap')[0].value()
+        self.usertotal_size = userUcHeap.dynamic_type.sizeof
+        self.useraddress = int(userUcHeap.address)
 
     def get_name(self):
         return "HEAP"
@@ -194,6 +223,14 @@ class Heap(AddressRegistree):
             task=Heap._get_allocating_task(entry),
             time=int(entry['xTimeAllocated'])
         )
+        
+    @staticmethod
+    def _make_pod_entry_user(entry):
+        entrySize = int(entry['xBlockSize']) & 0x7fffffff
+        return UserHeapEntry(
+            size=entrySize,
+            address=int(entry.address)
+        )        
 
     def get_stats(self):
         free_bytes = get_int_by_name('xFreeBytesRemaining')
@@ -206,9 +243,22 @@ class Heap(AddressRegistree):
             free_block_count=len(list(self.free())),
             taken_block_count=len(list(self.taken()))
         )
+        
+    def get_userStats(self):
+        free_bytes = get_int_by_name('xFreeBytesRemaining')
+        return UserHeapStats(
+            minimum_free=get_int_by_name('xMinimumEverFreeBytesRemaining'),
+            free=free_bytes,
+            size=self.usertotal_size,
+            used=self.usertotal_size - free_bytes,
+            free_block_count=len(list(self.userfree())),
+        )        
 
     def _check_ptr_invalid(self, pentry):
         return int(pentry) > (self.address + self.total_size) or int(pentry) < self.address
+        
+    def _check_user_ptr_invalid(self, pentry):
+        return int(pentry) > (self.useraddress + self.usertotal_size - HEAP_STRUCT_SIZE) or int(pentry) < self.useraddress        
 
     def free(self):
         if int(self.start['ulMarker']) != Heap.MARKER_SPECIAL:
@@ -226,6 +276,21 @@ class Heap(AddressRegistree):
                 raise HeapError(entry, "Invalid marker")
 
             yield Heap._make_pod_entry(entry)
+            
+    def userfree(self):
+        pentry = self.userstart['pxNextFreeBlock']
+
+        while pentry != self.userfreeEnd:
+            entry = pentry.dereference()
+            pentry = entry['pxNextFreeBlock']
+            if self._check_user_ptr_invalid(pentry):
+                raise UserHeapError(entry, "Invalid next free block - user heap integrity broken! ")
+
+            entrySize = int(entry['xBlockSize']) & 0x7fffffff
+            address=int(entry.address)
+            print("userHeap block addr: ", address, "\t\tsize: ", entrySize)   
+                
+            yield Heap._make_pod_entry_user(entry)            
 
     def taken(self):
         if int(self.start['ulMarker']) != Heap.MARKER_SPECIAL:
@@ -446,6 +511,19 @@ class PureGDB(gdb.Command):
                 print("\t{}".format(cmd))
                 for l in docstring.splitlines():
                     print("\t\t{}".format(l))
+                    
+    def cmd_userheapstats(self, args=None):
+        '''
+        Shows heap blocks and their size 
+        '''
+        print("User heap stats:")
+        stats = self.heap.get_userStats()
+
+        maxlen = max([len(desc) for desc in user_heap_stats_entries.values()])
+
+        for field, desc in user_heap_stats_entries.iteritems():
+            indent = (maxlen - len(desc)) * ' '
+            print("\t" + desc + indent, ":", getattr(stats, field))
 
     def cmd_tasks(self, args=None):
         '''
