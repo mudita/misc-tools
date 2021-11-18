@@ -1,0 +1,4 @@
+set target-charset ASCII
+set pagination off
+set verbose off
+set confirm off
