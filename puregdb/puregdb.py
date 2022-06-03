@@ -98,8 +98,11 @@ class PureTask(AddressRegistree):
         return self.inf.read_memory(int(self.v['pxStack']), l)
 
     def _check_stack_block_valid(self, address, bs):
+        '''
+        cheks wheter next `bs` count bytes are of FreeRTOS tskSTACK_FILL_BYTE
+        '''
         block = self.inf.read_memory(address, bs)
-        return all([b == '\xa5' for b in block])
+        return all([b == b'\xa5' for b in block])
 
     def check_stack(self, bs=STACKHEALTH_DEFAULT_BLOCK_SIZE):
         try:
@@ -125,6 +128,13 @@ class PureTask(AddressRegistree):
         val = gdb.Value(handle)
         val = val.cast(tsktype.pointer())
         return PureTask(inf, val) if val else None
+
+    @staticmethod
+    def from_symbol(inf):
+        val = gdb.lookup_symbol('pxCurrentTCB')[0].value()
+        val = val.cast(gdb.lookup_type('struct tskTaskControlBlock').pointer())
+        return PureTask(inf, val) if val else None
+
 
 
 HeapEntry = collections.namedtuple('HeapEntry', [
@@ -276,8 +286,11 @@ class Heap(AddressRegistree):
                 raise HeapError(entry, "Invalid marker")
 
             yield Heap._make_pod_entry(entry)
-            
+
     def userfree(self):
+        '''
+        returns list of free blocks on user heap - defined in usermem.c
+        '''
         pentry = self.userstart['pxNextFreeBlock']
 
         while pentry != self.userfreeEnd:
@@ -288,9 +301,8 @@ class Heap(AddressRegistree):
 
             entrySize = int(entry['xBlockSize']) & 0x7fffffff
             address=int(entry.address)
-            print("userHeap block addr: ", address, "\t\tsize: ", entrySize)   
-                
-            yield Heap._make_pod_entry_user(entry)            
+
+            yield Heap._make_pod_entry_user(entry)
 
     def taken(self):
         if int(self.start['ulMarker']) != Heap.MARKER_SPECIAL:
@@ -374,6 +386,11 @@ class PureGDB(gdb.Command):
 
         return [PureTask.from_handle(t.ptid[1], inf) for t in inf.threads()]
 
+    def _get_curent_thread(self):
+        inf = self._get_inferior()
+        return PureTask.from_symbol(inf)
+
+
     def cmd_memory(self, args=None):
         '''
         Shows memory used for each thread
@@ -406,7 +423,7 @@ class PureGDB(gdb.Command):
 
     def cmd_heapcheck(self, args=None):
         '''
-        Validates if heap used for stacks is not destroyed block by block
+        Validates if system heap used for stacks is not destroyed block by block
         depends on configSYSTEM_HEAP_STATS define variable
         '''
         if self.heap.validate():
@@ -417,7 +434,7 @@ class PureGDB(gdb.Command):
 
         maxlen = max([len(desc) for desc in heap_stats_entries.values()])
 
-        for field, desc in heap_stats_entries.iteritems():
+        for field, desc in heap_stats_entries.items():
             indent = (maxlen - len(desc)) * ' '
             print("\t" + desc + indent, ":", getattr(stats, field))
 
@@ -521,31 +538,41 @@ class PureGDB(gdb.Command):
 
         maxlen = max([len(desc) for desc in user_heap_stats_entries.values()])
 
-        for field, desc in user_heap_stats_entries.iteritems():
+        for field, desc in user_heap_stats_entries.items():
             indent = (maxlen - len(desc)) * ' '
             print("\t" + desc + indent, ":", getattr(stats, field))
 
     def cmd_tasks(self, args=None):
         '''
         Shows FreeRTOS tasks data in format:
-        |  no |     Handle | Priority | Stack start |  Stack end | Stack size |       Task name      |
+        |  no |     Handle | Priority | Stack start |  Stack end |   Stack [b] |       Task name      |
         ______________________________________________________________________________________________
         |   1 | 0x20001360 |        3 |  0x20000f40 | 0x20001338 |       1016 |      System_Watchdog |
         |   2 | 0x200039d8 |        0 |  0x200019b8 | 0x200039b0 |       8184 |        SysMgrService |
         '''
+        curent_task_name = self._get_curent_thread().get_name()
         tasks = [(int(t.v['uxTCBNumber']), t) for t in self._get_threads()]
-        header = "|  no |     Handle | Priority | Stack start |  Stack end | Stack size |       Task name      |"
-        print(header)
-        print("{}".format("".join([ '_' for v in header])))
+        header1 = "|            task              |                          stack                                |        Task                                  |"
+        header2 = "|   no |     Handle | Priority |       start |        Top |        end |       size | free [%] |          name            | health | overflow |"
+        print(header1)
+        print(header2)
+        print("{}".format("".join([ '_' for v in header2])))
         for num, t in sorted(tasks, key=lambda p: p[0]):
             address = t.get_address()
             priority = int(t.v['uxPriority'])
             stack_start = int(t.v['pxStack'])
+            stack_top = int(t.v['pxTopOfStack'])
             stack_end = int(t.v['pxEndOfStack'])
             name = t.get_name()
-            print("| {: >3} | 0x{:08x} | {: >8} |  0x{:08x} | 0x{:08x} | {: >10} | {: >20} |".format(
-                num, address, priority, stack_start, stack_end, stack_end - stack_start, name))
-        print("{}".format("".join([ '_' for v in header])))
+            if name == curent_task_name:
+                num = "* " + str(num)
+            stack_health = "OK" if t.check_stack(STACKHEALTH_DEFAULT_BLOCK_SIZE) else "FAIL"
+            free = t.get_free_stack_size(STACKHEALTH_DEFAULT_BLOCK_SIZE)
+            size = t.get_stack_size()
+            pfree = float(free)/float(size)*100.0
+            overflown = "OK" if stack_start < stack_top and stack_top < stack_end else "OVERFLOW"
+            print(f"| {num: >4} | 0x{address:08x} | {priority: >8} |  0x{stack_start:08x} | 0x{stack_top:08x} | 0x{stack_end:08x} | {size: >10} |    {pfree:2.2f} | {name: >24} |  {stack_health: >5} | {overflown: >8} |")
+        print("{}".format("".join([ '_' for v in header2])))
 
     def invoke(self, arg, from_tty):
         if arg == "":
