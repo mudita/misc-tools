@@ -179,18 +179,32 @@ download_get_backtrace() {
         exit_abnormal "Unable to detect product by tag $1"
     fi
     local dump="$2"
-    local url_elf="https://github.com/mudita/MuditaOS/releases/download/$tag/$elf"
-    local url_dbg="https://github.com/mudita/MuditaOS/releases/download/$tag/$dbg"
+    local url_assets="https://api.github.com/repos/mudita/MuditaOS-releases/releases/tags/$tag"
+    local gh_token="$(git config user.apitoken)"
+    if [ -z "$gh_token" ]; then
+        exit_abnormal "No user token defined in git user.apitoken variable"
+    fi
+    local auth_header="Authorization: token $gh_token"
+
+    echo "Fetching URLs..."
+    local assets=$(curl -sH "$auth_header" "$url_assets")
+    local url_elf=$(echo "$assets" | jq -r ".assets[] | select(.name==\"$elf\") | .url")
+    local url_dbg=$(echo "$assets" | jq -r ".assets[] | select(.name==\"$dbg\") | .url")
+
     local elf="$(mktemp)"
     local dbgxz="$(mktemp)"
     local dbg="$(mktemp)"
     traplib_add_on_exit rm "$elf"
     traplib_add_on_exit rm "$dbg"
     traplib_add_on_exit rm "$dbgxz"
-    wget -q --show-progress "$url_elf" -O "$elf"
-    wget -q --show-progress  "$url_dbg" -O "$dbgxz"
+
+    echo "Fetching ELF..."
+    wget -q --show-progress --header="Accept: application/octet-stream" --header="$auth_header" "$url_elf" -O "$elf"
+    echo "Fetching DBG..."
+    wget -q --show-progress --header="Accept: application/octet-stream" --header="$auth_header" "$url_dbg" -O "$dbgxz"
+
     pv "$dbgxz" | xz -d --stdout  > "$dbg"
-	get_backtrace "$elf" "$dbg" "$dump"
+	  get_backtrace "$elf" "$dbg" "$dump"
 }
 
 
@@ -199,14 +213,14 @@ get_backtrace() {
 	local elf="$1"
 	local dbg="$2"
 	local dump="$3"
-    arm-none-eabi-gdb "$elf" \
+  arm-none-eabi-gdb "$elf" \
         -x "$LIB_DIR/crashdump-gdbinit" \
         -ex "target remote | \"$CRASH_DEBUG\" --elf \"$elf\" --dump \"$dump\"" \
         -ex "symbol-file $dbg" \
-        -ex 'backtrace' -ex 'quit'
+        -ex 'backtrace'
 }
 parse_cmdline "$@"
-validate_req_cmds xz arm-none-eabi-gdb pv wget make gcc git
+validate_req_cmds xz arm-none-eabi-gdb pv make gcc git curl wget jq
 build_crash_debug
 if [[ -v BUILD_DIR ]]; then
 	get_backtrace "$ELF_FILE" "$DBG_FILE" "$DUMP_FILE"
