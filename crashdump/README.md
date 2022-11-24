@@ -76,11 +76,14 @@ Backtrace stopped: Cannot access memory at address 0xa5a5a5a9
 ```
 ### Retrive stacktrace from the developer build
 
-The script is not only to able to retrive stacktrace from regular release but also it can take a stacktrace from the developer build. The script is located in the OS repository in the following location **tools/misc/crashdump**. 
-If we have a build binary we can retrive the stacktrace using the following command: `sh ./crashdump_backtrace.sh --dir ~/worksrc/MuditaOS/build-PurePhone-rt1051-RelWithDebInfo --dump ~/worksrc/crashdump.sample/crashdump.hex`
+The script is not only to able to retrieve stacktrace from regular release but also it can take a stacktrace from the developer build. The script is located in the OS repository in the following location **tools/misc/crashdump**. 
+If we have a build binary we can retrieve the stacktrace using the following command: `sh ./crashdump_backtrace.sh --dir ~/worksrc/MuditaOS/build-PurePhone-rt1051-RelWithDebInfo --dump ~/worksrc/crashdump.sample/crashdump.hex`
 Where:
 
 * **--dir** is a path to the OS build directory
 * **--dump** is a path to the crash dump for analyse on the phone 
+
+Also, an optional argument can be given for both developer and release builds:
+* **--gdb** is a path to a custom GDB executable, e.g. when you need one more recent than the system's default
 
 For more information you can type: `sh crashdump_backtrace.sh --help`
