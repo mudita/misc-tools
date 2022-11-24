@@ -11,9 +11,9 @@ help()
 cat<<EOF
 Usage:
 Analyse crashdump from the regular release and print on the stdout
-    $(basename $0) --dump <crashdump-file> --tag <git-tag>
+    $(basename $0) --dump <crashdump-file> --tag <git-tag> [--gdb <path-to-GDB>]
 Analyse crashdump from the developer OS build and print on the stdout
-    $(basename $0) --dump <crashdump-file> --dir <build-dir>
+    $(basename $0) --dump <crashdump-file> --dir <build-dir> [--gdb <path-to-GDB>]
 Display help:
     $(basename $0) --help
 
@@ -23,6 +23,8 @@ Mandatory arguments for regular release:
 Mandatory arguments for the developer build:
     crashdump-file:     The crash dump file grabbed from the phone
     build-dir:          Build directory with the MuditaOS source
+Optional arguments:
+    path-to-gdb:        Path to the GDB executable to use to analyze the dump
 EOF
     exit 0
 }
@@ -43,7 +45,7 @@ EOF
 validate_req_cmds() {
     for cmd in $@; do
         if [ ! $(command -v $cmd) ]; then
-            echo "Error! $cmd is not installed, please use your package manager to install required tool. E.g. sudo apt install"
+            echo "Error! $cmd is not installed, please provide the tool e.g. by installing with your package manager"
             exit 100
         fi
     done
@@ -77,6 +79,7 @@ autodetect_product_with_tag() {
     echo "$dbg"
 }
 
+GDB="arm-none-eabi-gdb"
 
 # Parse command line arguments
 parse_cmdline() {
@@ -84,6 +87,7 @@ parse_cmdline() {
         "dump:"
         "tag:"
         "dir:"
+        "gdb"
         "help"
     )
     local args=("$@")
@@ -107,6 +111,10 @@ parse_cmdline() {
                 ;;
             --tag)
                 BUILD_TAG="$2"
+                shift
+                ;;
+            --gdb)
+                GDB="$3"
                 shift
                 ;;
             --)
@@ -213,14 +221,14 @@ get_backtrace() {
 	local elf="$1"
 	local dbg="$2"
 	local dump="$3"
-  arm-none-eabi-gdb "$elf" \
+  "$GDB" "$elf" \
         -x "$LIB_DIR/crashdump-gdbinit" \
         -ex "target remote | \"$CRASH_DEBUG\" --elf \"$elf\" --dump \"$dump\"" \
         -ex "symbol-file $dbg" \
         -ex 'backtrace'
 }
 parse_cmdline "$@"
-validate_req_cmds xz arm-none-eabi-gdb pv make gcc git curl wget jq
+validate_req_cmds xz "$GDB" pv make gcc git curl wget jq
 build_crash_debug
 if [[ -v BUILD_DIR ]]; then
 	get_backtrace "$ELF_FILE" "$DBG_FILE" "$DUMP_FILE"
