@@ -245,9 +245,9 @@ class Heap(AddressRegistree):
         )
         
     def get_userStats(self):
-        free_bytes = get_int_by_name('xFreeBytesRemaining')
+        free_bytes = get_int_by_name('userxFreeBytesRemaining')
         return UserHeapStats(
-            minimum_free=get_int_by_name('xMinimumEverFreeBytesRemaining'),
+            minimum_free=get_int_by_name('userxMinimumEverFreeBytesRemaining'),
             free=free_bytes,
             size=self.usertotal_size,
             used=self.usertotal_size - free_bytes,
@@ -288,7 +288,7 @@ class Heap(AddressRegistree):
 
             entrySize = int(entry['xBlockSize']) & 0x7fffffff
             address=int(entry.address)
-            print("userHeap block addr: ", address, "\t\tsize: ", entrySize)   
+            # print("userHeap block addr: ", address, "\t\tsize: ", entrySize)   
                 
             yield Heap._make_pod_entry_user(entry)            
 
