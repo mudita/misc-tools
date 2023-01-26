@@ -1,7 +1,7 @@
 # Copyright (c) 2017-2021, Mudita Sp. z.o.o. All rights reserved.
 # For licensing, see https://github.com/mudita/MuditaOS/LICENSE.md
 
-import collections
+from collections import namedtuple
 import traceback
 
 import gdb
@@ -9,7 +9,59 @@ import gdb
 STACKHEALTH_DEFAULT_BLOCK_SIZE = 32
 HEAP_STRUCT_SIZE = 32
 
-AddressRange = collections.namedtuple("AddressRange", ["low", "high", "name"])
+AddressRange = namedtuple("AddressRange", ["low", "high", "name"])
+HeapEntry = namedtuple("HeapEntry", ["address", "size", "task", "time"])
+UserHeapEntry = namedtuple("UserHeapEntry", ["address", "size"])
+heap_stats_entries = {
+    "minimum_free": "Lowest size of heap",
+    "free": "Free size",
+    "size": "Overall heap size",
+    "used": "Used size (block + metadata)",
+    "taken": "Overall size of blocks (w/o metadata)",
+    "free_block_count": "Free blocks count",
+    "taken_block_count": "Taken blocks count",
+}
+user_heap_stats_entries = {
+    "minimum_free": "Lowest size of heap",
+    "free": "Free size",
+    "size": "Overall heap size",
+    "used": "Used size (block + metadata)",
+    "free_block_count": "Free blocks count",
+}
+HeapStats = namedtuple("HeapStats", heap_stats_entries.keys())
+UserHeapStats = namedtuple("UserHeapStats", user_heap_stats_entries.keys())
+
+# Exceptions
+class StackError(Exception):
+    def __init__(self, task, reason=""):
+        self.task = task
+        self.reason = reason
+
+    def __str__(self):
+        return self.reason
+
+
+class HeapError(Exception):
+    def __init__(self, entry, reason="", prev=None):
+        self.entry = entry
+        self.prev = prev
+        self.reason = reason
+        self.address = int(entry.address)
+        self.prev_address = int(prev.address)
+
+    def __str__(self):
+        return self.reason
+
+
+class UserHeapError(Exception):
+    def __init__(self, entry, reason="", prev=None):
+        self.entry = entry
+        self.prev = prev
+        self.reason = reason
+        self.useraddress = int(entry.address)
+
+    def __str__(self):
+        return self.reason
 
 
 def get_int_by_name(varname):
@@ -21,17 +73,20 @@ def get_int_by_name(varname):
 
 
 class AddressRegistry:
-    def __init__(self):
-        self.entries = []
+    def __init__(self, name: str = "", low: str = "", high: str = ""):
+        self._name = name
+        self._low = low
+        self._high = high
+        self._entries = []
 
     def register(self, entry):
-        self.entries.append(entry)
-        self.entries.sort(key=lambda e: e.get_low_address())
+        self._entries.append(entry)
+        self._entries.sort(key=lambda e: e.get_low_address())
 
     def match(self, address):
         return [
             entry
-            for entry in self.entries
+            for entry in self._entries
             if entry.get_low_address() <= address and entry.get_high_address() > address
         ]
 
@@ -67,15 +122,6 @@ class AddressRegistree:
 
     def get_high_address(self):
         raise NotImplementedError("AddressRegistree.get_high_address")
-
-
-class StackError(Exception):
-    def __init__(self, task, reason=""):
-        self.task = task
-        self.reason = reason
-
-    def __str__(self):
-        return self.reason
 
 
 class PureTask(AddressRegistree):
@@ -132,51 +178,6 @@ class PureTask(AddressRegistree):
         val = gdb.Value(handle)
         val = val.cast(tsktype.pointer())
         return PureTask(inf, val) if val else None
-
-
-HeapEntry = collections.namedtuple("HeapEntry", ["address", "size", "task", "time"])
-UserHeapEntry = collections.namedtuple("UserHeapEntry", ["address", "size"])
-heap_stats_entries = {
-    "minimum_free": "Lowest size of heap",
-    "free": "Free size",
-    "size": "Overall heap size",
-    "used": "Used size (block + metadata)",
-    "taken": "Overall size of blocks (w/o metadata)",
-    "free_block_count": "Free blocks count",
-    "taken_block_count": "Taken blocks count",
-}
-user_heap_stats_entries = {
-    "minimum_free": "Lowest size of heap",
-    "free": "Free size",
-    "size": "Overall heap size",
-    "used": "Used size (block + metadata)",
-    "free_block_count": "Free blocks count",
-}
-HeapStats = collections.namedtuple("HeapStats", heap_stats_entries.keys())
-UserHeapStats = collections.namedtuple("UserHeapStats", user_heap_stats_entries.keys())
-
-
-class HeapError(Exception):
-    def __init__(self, entry, reason="", prev=None):
-        self.entry = entry
-        self.prev = prev
-        self.reason = reason
-        self.address = int(entry.address)
-        self.prev_address = int(prev.address)
-
-    def __str__(self):
-        return self.reason
-
-
-class UserHeapError(Exception):
-    def __init__(self, entry, reason="", prev=None):
-        self.entry = entry
-        self.prev = prev
-        self.reason = reason
-        self.useraddress = int(entry.address)
-
-    def __str__(self):
-        return self.reason
 
 
 class Heap(AddressRegistree):
@@ -295,7 +296,7 @@ class Heap(AddressRegistree):
 
             entrySize = int(entry["xBlockSize"]) & 0x7FFFFFFF
             address = int(entry.address)
-            # print("userHeap block addr: ", address, "\t\tsize: ", entrySize)
+            print("userHeap block addr: ", address, "\t\tsize: ", entrySize)
 
             yield Heap._make_pod_entry_user(entry)
 
@@ -399,7 +400,7 @@ class PureGDB(gdb.Command):
 
         # no arguments, display memory map
         if args is None or len(args) == 0:
-            print_results(self.address_registry.entries)
+            print_results(self.address_registry._entries)
             return
 
         if len(args) > 1:
@@ -414,7 +415,7 @@ class PureGDB(gdb.Command):
         if not print_results(self.address_registry.match(address)):
             print("Can't match any of known memory regions to address", args[0])
 
-    def cmd_heapcheck(self, args=None):
+    def cmd_heapcheck(self):
         """
         Validates if heap used for stacks is not destroyed block by block
         depends on configSYSTEM_HEAP_STATS define variable
@@ -422,12 +423,12 @@ class PureGDB(gdb.Command):
         if self.heap.validate():
             print("Heap check OK")
 
-    def cmd_heapstats(self, args=None):
+    def cmd_heapstats(self):
         stats = self.heap.get_stats()
 
         maxlen = max([len(desc) for desc in heap_stats_entries.values()])
 
-        for field, desc in heap_stats_entries.iteritems():
+        for field, desc in heap_stats_entries.items():
             indent = (maxlen - len(desc)) * " "
             print("\t" + desc + indent, ":", getattr(stats, field))
 
@@ -473,7 +474,7 @@ class PureGDB(gdb.Command):
         if valid:
             print("Stack check OK")
 
-    def cmd_checkhealth(self, args=None):
+    def cmd_checkhealth(self):
         """
         Verifies:
             - stack for each thread with stackcheck
@@ -509,22 +510,23 @@ class PureGDB(gdb.Command):
         for d in sorted(data, key=lambda o: o[3]):
             print("\t", format(d[3], "3.2f"), "\t", d[2], "\t", d[1], "\t", d[0])
 
-    def cmd_help(self, args=None):
+    def cmd_help(self):
         """
         Shows name for each function available as command and it's docstring
         """
         print("Valid commands:")
         for cmd in dir(PureGDB):
             if cmd.startswith("cmd_"):
-                docstring = eval("self.{}.__doc__".format(cmd))
-                if docstring is None:
-                    docstring = "Not documented"
-                cmd = cmd.replace("cmd_", "")
-                print("\t{}".format(cmd))
-                for l in docstring.splitlines():
-                    print("\t\t{}".format(l))
+                docstring = self.__dict__[cmd].__doc__
+                print("\t{cmd.replace('cmd_', '')}")
+                docstring = (
+                    [f"\t\t{line}" for line in docstring.splitlines()]
+                    if docstring
+                    else ["Not documented"]
+                )
+                print("\n".join(docstring))
 
-    def cmd_userheapstats(self, args=None):
+    def cmd_userheapstats(self):
         """
         Shows heap blocks and their size
         """
@@ -533,11 +535,11 @@ class PureGDB(gdb.Command):
 
         maxlen = max([len(desc) for desc in user_heap_stats_entries.values()])
 
-        for field, desc in user_heap_stats_entries.iteritems():
+        for field, desc in user_heap_stats_entries.items():
             indent = (maxlen - len(desc)) * " "
             print("\t" + desc + indent, ":", getattr(stats, field))
 
-    def cmd_tasks(self, args=None):
+    def cmd_tasks(self):
         """
         Shows FreeRTOS tasks data in format:
         |  no |     Handle | Priority | Stack start |  Stack end | Stack size |       Task name      |
@@ -546,7 +548,8 @@ class PureGDB(gdb.Command):
         |   2 | 0x200039d8 |        0 |  0x200019b8 | 0x200039b0 |       8184 |        SysMgrService |
         """
         tasks = [(int(t.v["uxTCBNumber"]), t) for t in self._get_threads()]
-        header = "|  no |     Handle | Priority | Stack start |  Stack end | Stack size |       Task name      |"
+        header = "|  no |     Handle | Priority | Stack start |"
+        "  Stack end | Stack size |       Task name      |"
         print(header)
         print("{}".format("".join(["_" for v in header])))
         for num, t in sorted(tasks, key=lambda p: p[0]):
@@ -568,7 +571,7 @@ class PureGDB(gdb.Command):
             )
         print("{}".format("".join(["_" for v in header])))
 
-    def invoke(self, arg, from_tty):
+    def invoke(self, arg):
         if arg == "":
             self.cmd_help()
             return
