@@ -99,7 +99,8 @@ class PureTask(AddressRegistree):
 
     def _check_stack_block_valid(self, address, bs):
         block = self.inf.read_memory(address, bs)
-        return all([b == '\xa5' for b in block])
+        # Different types for Python 2.7 and 3
+        return all([(b == '\xa5' or b == bytes([0xa5])) for b in block])
 
     def check_stack(self, bs=STACKHEALTH_DEFAULT_BLOCK_SIZE):
         try:
@@ -521,7 +522,7 @@ class PureGDB(gdb.Command):
 
         maxlen = max([len(desc) for desc in user_heap_stats_entries.values()])
 
-        for field, desc in user_heap_stats_entries.iteritems():
+        for field, desc in user_heap_stats_entries.items():
             indent = (maxlen - len(desc)) * ' '
             print("\t" + desc + indent, ":", getattr(stats, field))
 
