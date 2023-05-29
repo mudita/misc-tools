@@ -131,9 +131,6 @@ class PureTask(AddressRegistree):
 HeapEntry = collections.namedtuple('HeapEntry', [
     'address', 'size', 'task', 'time'
 ])
-UserHeapEntry = collections.namedtuple('UserHeapEntry', [
-    'address', 'size'
-])
 heap_stats_entries = {
     "minimum_free": "Lowest size of heap",
     "free": "Free size",
@@ -193,8 +190,11 @@ class Heap(AddressRegistree):
         self.total_size = ucHeap.dynamic_type.sizeof
         self.address = int(ucHeap.address)
         self.taken_end = gdb.lookup_symbol('xTakenEnd')[0].value()
-        self.userstart = gdb.lookup_symbol('userxStart')[0].value()
-        self.userfreeEnd = gdb.lookup_symbol('userpxEnd')[0].value()
+        self.userstart = gdb.lookup_symbol('xUserStart')[0].value()
+        self.userfreeEnd = gdb.lookup_symbol('pxUserEnd')[0].value()
+        extendedStats, _ = gdb.lookup_symbol('xUserTakenEnd')
+        if extendedStats is not None:
+            self.usertaken_end = gdb.lookup_symbol('xUserTakenEnd')[0].value()
         userUcHeap = gdb.lookup_symbol('userUcHeap')[0].value()
         self.usertotal_size = userUcHeap.dynamic_type.sizeof
         self.useraddress = int(userUcHeap.address)
@@ -224,14 +224,6 @@ class Heap(AddressRegistree):
             task=Heap._get_allocating_task(entry),
             time=int(entry['xTimeAllocated'])
         )
-        
-    @staticmethod
-    def _make_pod_entry_user(entry):
-        entrySize = int(entry['xBlockSize']) & 0x7fffffff
-        return UserHeapEntry(
-            size=entrySize,
-            address=int(entry.address)
-        )        
 
     def get_stats(self):
         free_bytes = get_int_by_name('xFreeBytesRemaining')
@@ -246,9 +238,9 @@ class Heap(AddressRegistree):
         )
         
     def get_userStats(self):
-        free_bytes = get_int_by_name('userxFreeBytesRemaining')
+        free_bytes = get_int_by_name('xUserFreeBytesRemaining')
         return UserHeapStats(
-            minimum_free=get_int_by_name('userxMinimumEverFreeBytesRemaining'),
+            minimum_free=get_int_by_name('xUserMinimumEverFreeBytesRemaining'),
             free=free_bytes,
             size=self.usertotal_size,
             used=self.usertotal_size - free_bytes,
@@ -291,7 +283,7 @@ class Heap(AddressRegistree):
             address=int(entry.address)
             # print("userHeap block addr: ", address, "\t\tsize: ", entrySize)   
                 
-            yield Heap._make_pod_entry_user(entry)            
+            yield Heap._make_pod_entry(entry)
 
     def taken(self):
         if int(self.start['ulMarker']) != Heap.MARKER_SPECIAL:
@@ -312,8 +304,30 @@ class Heap(AddressRegistree):
             prev = entry
             entry = entry['pxNextTakenBlock'].dereference()
 
+    def user_taken(self):
+        entry = self.userstart['pxNextTakenBlock']
+        prev = entry
+
+        while entry.address != self.usertaken_end.address:
+            if self._check_user_ptr_invalid(entry['pxNextTakenBlock']) and entry['pxNextTakenBlock'] != self.usertaken_end.address:
+                raise UserHeapError(entry, "Invalid next taken block", prev)
+
+            yield Heap._make_pod_entry(entry)
+
+            prev = entry
+            entry = entry['pxNextTakenBlock'].dereference()
+
     def taken_per_task(self):
         taken_blocks = self.taken()
+        histogram = {}
+        for block in taken_blocks:
+            if block.task:
+                task_name = block.task.get_name()
+                histogram[task_name] = histogram.get(task_name, 0) + block.size
+        return histogram
+    
+    def user_taken_per_task(self):
+        taken_blocks = self.user_taken()
         histogram = {}
         for block in taken_blocks:
             if block.task:
@@ -525,6 +539,19 @@ class PureGDB(gdb.Command):
         for field, desc in user_heap_stats_entries.items():
             indent = (maxlen - len(desc)) * ' '
             print("\t" + desc + indent, ":", getattr(stats, field))
+
+        extendedStats, _ = gdb.lookup_symbol('xUserTakenEnd')
+        if extendedStats is None:
+            print("to get extended user heap statistics set 'configUSER_HEAP_EXTENDED_STATS' to '1'")
+            return
+        
+        print("\tNumber of successful allocations\t: {}".format(get_int_by_name('xUserNumberOfSuccessfulAllocations')))
+        print("\tNumber of successful frees\t\t: {}".format(get_int_by_name('xUserNumberOfSuccessfulFrees')))
+        print("collecting data - this may take a few minutes...")
+        histogram = self.heap.user_taken_per_task()
+        for task_name, memory_size in histogram.items():
+            indent = (maxlen - len(task_name)) * ' '
+            print('\t' + task_name + indent, ':', str(memory_size))
 
     def cmd_tasks(self, args=None):
         '''
