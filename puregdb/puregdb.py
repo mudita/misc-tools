@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import gdb
 
+import sys
 import collections
 import traceback
 
@@ -432,7 +433,7 @@ class PureGDB(gdb.Command):
 
         maxlen = max([len(desc) for desc in heap_stats_entries.values()])
 
-        for field, desc in heap_stats_entries.iteritems():
+        for field, desc in heap_stats_entries.items():
             indent = (maxlen - len(desc)) * ' '
             print("\t" + desc + indent, ":", getattr(stats, field))
 
@@ -516,6 +517,8 @@ class PureGDB(gdb.Command):
         '''
         Shows name for each function available as command and it's docstring
         '''
+        print("python version is: " + str(sys.version) + "\n")
+
         print("Valid commands:")
         for cmd in dir(PureGDB):
             if cmd.startswith("cmd_"):
